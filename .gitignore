@@ -30,3 +30,25 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# --- FireVoiceBox ---
+# Compiled binaries
+/bin/
+firevoicebox
+firevoicebox-linux-*
+
+# Runtime data (self-released config, SQLite db, uploaded audio)
+/config.json
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend
+web/node_modules/
+web/.vite/
+*.tsbuildinfo
+# NOTE: internal/web/dist/ (the built UI) IS committed so that `go build` and
+# `go test` work on a fresh clone without Node installed, and the binary always
+# embeds a real UI. Rebuild it with `pnpm --dir web build` (or `make web`).
+

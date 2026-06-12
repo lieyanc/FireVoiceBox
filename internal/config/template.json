@@ -1,0 +1,19 @@
+{
+  "server": {
+    "addr": ":8080",
+    "data_dir": "./data",
+    "trusted_proxy": true,
+    "max_upload_mb": 25,
+    "secret": ""
+  },
+  "admin": {
+    "password": ""
+  },
+  "transcode": {
+    "enabled": false,
+    "ffmpeg_path": "ffmpeg",
+    "format": "mp3",
+    "bitrate": "128k",
+    "on_error": "keep_original"
+  }
+}
