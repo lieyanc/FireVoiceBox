@@ -8,6 +8,41 @@ import (
 	"github.com/lieyan666/firevoicebox/internal/store"
 )
 
+const (
+	cacheControlImmutableAsset = "public, max-age=31536000, immutable"
+	cacheControlNoStore        = "no-store, max-age=0"
+	cacheControlPrivateNoStore = "private, no-store, max-age=0"
+	forceRefreshQueryParam     = "fvb_refresh"
+)
+
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setNoStoreHeaders(w, true)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setNoStoreHeaders(w http.ResponseWriter, private bool) {
+	if private {
+		w.Header().Set("Cache-Control", cacheControlPrivateNoStore)
+	} else {
+		w.Header().Set("Cache-Control", cacheControlNoStore)
+	}
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+}
+
+func setSPAFileCacheHeaders(w http.ResponseWriter, r *http.Request, p string) {
+	if strings.HasPrefix(p, "assets/") {
+		w.Header().Set("Cache-Control", cacheControlImmutableAsset)
+		return
+	}
+	setNoStoreHeaders(w, false)
+	if r.URL.Query().Has(forceRefreshQueryParam) {
+		w.Header().Set("Clear-Site-Data", `"cache"`)
+	}
+}
+
 // clientIP extracts the client IP, honouring X-Forwarded-For / X-Real-IP only
 // when trusted_proxy is enabled (otherwise those headers are attacker-controlled
 // and would let clients bypass per-IP limits).

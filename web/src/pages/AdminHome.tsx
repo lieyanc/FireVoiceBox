@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, LogOut, Loader2, Mic, Lock, RefreshCw } from 'lucide-react'
+import { Plus, LogOut, Loader2, Mic, Lock, RefreshCw, Settings } from 'lucide-react'
 import { api, ApiError, type Project } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast'
 import { ProjectFormDialog } from '@/components/ProjectFormDialog'
 import { formatDateTime, formatDuration } from '@/lib/format'
 import { UpdatePanel } from '@/pages/UpdatePanel'
+import { SettingsPanel } from '@/pages/SettingsPanel'
 
 export function AdminHome() {
   const [authed, setAuthed] = useState<boolean | null>(null)
@@ -87,7 +88,7 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
   const { error, success } = useToast()
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [view, setView] = useState<'projects' | 'update'>('projects')
+  const [view, setView] = useState<'projects' | 'update' | 'settings'>('projects')
 
   async function load() {
     try {
@@ -141,6 +142,13 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
             >
               <RefreshCw className="h-4 w-4" /> 更新
             </Button>
+            <Button
+              size="sm"
+              variant={view === 'settings' ? 'secondary' : 'ghost'}
+              onClick={() => setView('settings')}
+            >
+              <Settings className="h-4 w-4" /> 设置
+            </Button>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -157,6 +165,8 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
 
       {view === 'update' ? (
         <UpdatePanel />
+      ) : view === 'settings' ? (
+        <SettingsPanel />
       ) : (
         <>
           {projects === null ? (

@@ -66,6 +66,38 @@ export interface UpdateCheckResult {
   channel: string
 }
 
+export interface ClientVersion {
+  ok: boolean
+  cache_key: string
+}
+
+export interface AppSettings {
+  server: {
+    addr: string
+    data_dir: string
+    trusted_proxy: boolean
+    max_upload_mb: number
+    secret: string
+  }
+  admin: {
+    password: string
+  }
+  transcode: {
+    enabled: boolean
+    ffmpeg_path: string
+    format: string
+    bitrate: string
+    on_error: 'keep_original' | 'reject' | string
+  }
+  update: {
+    enabled: boolean
+    channel: 'stable' | 'dev' | string
+    check_interval: number
+    tag: string
+    repo: string
+  }
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -77,6 +109,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: 'same-origin',
+    cache: 'no-store',
     ...opts,
   })
   if (!res.ok) {
@@ -99,7 +132,16 @@ function tokenHeaders(token?: string): HeadersInit {
   return token ? { 'X-Manage-Token': token } : {}
 }
 
+function cacheBusted(path: string): string {
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}_=${Date.now()}`
+}
+
 export const api = {
+  // Client cache coordination
+  clientVersion: (fresh = false) =>
+    request<ClientVersion>(fresh ? cacheBusted(`/api/client/version`) : `/api/client/version`),
+
   // Public recording page
   getPublicProject: (key: string) => request<PublicProject>(`/api/p/${encodeURIComponent(key)}`),
   submit: (key: string, form: FormData) =>
@@ -134,7 +176,15 @@ export const api = {
     }),
   deleteProject: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/projects/${id}`, { method: 'DELETE' }),
-  version: () => request<{ ok: boolean; version: VersionInfo }>(`/api/admin/version`),
+  settings: () => request<{ ok: boolean; settings: AppSettings }>(`/api/admin/settings`),
+  updateSettings: (settings: AppSettings) =>
+    request<{ ok: boolean; settings: AppSettings }>(`/api/admin/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+  version: (fresh = false) =>
+    request<{ ok: boolean; version: VersionInfo }>(fresh ? cacheBusted(`/api/admin/version`) : `/api/admin/version`),
   updateStatus: () => request<{ ok: boolean; status: UpdateStatus }>(`/api/admin/update/status`),
   checkUpdate: () =>
     request<{ ok: boolean; result: UpdateCheckResult; error?: string }>(`/api/admin/update/check`, {

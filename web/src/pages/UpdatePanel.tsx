@@ -4,6 +4,7 @@ import { api, ApiError, type UpdateCheckResult, type UpdateStatus, type VersionI
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { refreshIfClientCacheChanged } from '@/lib/client-cache'
 
 const ACTIVE_STATES = new Set(['checking', 'downloading', 'applying'])
 
@@ -58,7 +59,20 @@ export function UpdatePanel() {
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
-    const [versionData, statusData] = await Promise.all([api.version(), api.updateStatus()])
+    const [versionData, statusData, clientVersion] = await Promise.all([
+      api.version(true),
+      api.updateStatus(),
+      api.clientVersion(true),
+    ])
+    if (
+      await refreshIfClientCacheChanged(clientVersion.cache_key, () => {
+        setVersion(versionData.version)
+        setStatus(statusData.status)
+        setMessage('新版本已安装，正在强制刷新缓存')
+      })
+    ) {
+      return
+    }
     setVersion(versionData.version)
     setStatus(statusData.status)
   }, [])

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lieyan666/firevoicebox/internal/config"
@@ -19,6 +20,7 @@ import (
 // Storer saves audio blobs under a base directory.
 type Storer struct {
 	baseDir  string // .../data/audio
+	mu       sync.RWMutex
 	cfg      config.TranscodeConfig
 	ffmpegOK bool
 }
@@ -28,19 +30,37 @@ type Storer struct {
 // uploads in their original format.
 func New(audioDir string, cfg config.TranscodeConfig) *Storer {
 	s := &Storer{baseDir: audioDir, cfg: cfg}
-	if cfg.Enabled {
-		if err := probeFFmpeg(cfg.FFmpegPath); err != nil {
-			log.Printf("audio: transcoding enabled but ffmpeg unavailable (%v); falling back to native format", err)
-		} else {
-			s.ffmpegOK = true
-			log.Printf("audio: transcoding enabled -> %s @ %s via %s", cfg.Format, cfg.Bitrate, cfg.FFmpegPath)
-		}
-	}
+	s.ffmpegOK = ffmpegAvailable(cfg)
 	return s
 }
 
 // Transcoding reports whether uploads will be transcoded.
-func (s *Storer) Transcoding() bool { return s.cfg.Enabled && s.ffmpegOK }
+func (s *Storer) Transcoding() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Enabled && s.ffmpegOK
+}
+
+// UpdateTranscodeConfig applies new transcoding settings for future uploads.
+func (s *Storer) UpdateTranscodeConfig(cfg config.TranscodeConfig) {
+	ffmpegOK := ffmpegAvailable(cfg)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg = cfg
+	s.ffmpegOK = ffmpegOK
+}
+
+func ffmpegAvailable(cfg config.TranscodeConfig) bool {
+	if !cfg.Enabled {
+		return false
+	}
+	if err := probeFFmpeg(cfg.FFmpegPath); err != nil {
+		log.Printf("audio: transcoding enabled but ffmpeg unavailable (%v); falling back to native format", err)
+		return false
+	}
+	log.Printf("audio: transcoding enabled -> %s @ %s via %s", cfg.Format, cfg.Bitrate, cfg.FFmpegPath)
+	return true
+}
 
 func probeFFmpeg(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -56,17 +76,22 @@ func probeFFmpeg(path string) error {
 // with ffmpeg, and the temp file removed. On transcode failure the behaviour
 // depends on cfg.OnError ("keep_original" or "reject").
 func (s *Storer) Save(projectID, subID, srcMime string, data []byte) (relPath, mime string, size int64, err error) {
+	s.mu.RLock()
+	cfg := s.cfg
+	ffmpegOK := s.ffmpegOK
+	s.mu.RUnlock()
+
 	dir := filepath.Join(s.baseDir, projectID)
 	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", 0, err
 	}
 
-	if s.Transcoding() {
-		rel, m, sz, terr := s.saveTranscoded(dir, projectID, subID, srcMime, data)
+	if cfg.Enabled && ffmpegOK {
+		rel, m, sz, terr := s.saveTranscoded(dir, projectID, subID, srcMime, data, cfg)
 		if terr == nil {
 			return rel, m, sz, nil
 		}
-		if s.cfg.OnError == "reject" {
+		if cfg.OnError == "reject" {
 			return "", "", 0, fmt.Errorf("transcode failed: %w", terr)
 		}
 		log.Printf("audio: transcode failed for %s (%v); keeping original", subID, terr)
@@ -89,7 +114,7 @@ func (s *Storer) saveNative(dir, projectID, subID, srcMime string, data []byte) 
 	return filepath.Join(projectID, name), mime, int64(len(data)), nil
 }
 
-func (s *Storer) saveTranscoded(dir, projectID, subID, srcMime string, data []byte) (string, string, int64, error) {
+func (s *Storer) saveTranscoded(dir, projectID, subID, srcMime string, data []byte, cfg config.TranscodeConfig) (string, string, int64, error) {
 	tmp, err := os.CreateTemp(dir, "tmp-"+subID+"-*"+extForMime(srcMime))
 	if err != nil {
 		return "", "", 0, err
@@ -102,15 +127,15 @@ func (s *Storer) saveTranscoded(dir, projectID, subID, srcMime string, data []by
 	}
 	tmp.Close()
 
-	outName := subID + "." + s.cfg.Format
+	outName := subID + "." + cfg.Format
 	outPath := filepath.Join(dir, outName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	// -vn drops any video track; -y overwrites; map only audio to the target codec.
-	cmd := exec.CommandContext(ctx, s.cfg.FFmpegPath,
+	cmd := exec.CommandContext(ctx, cfg.FFmpegPath,
 		"-hide_banner", "-loglevel", "error", "-y",
-		"-i", tmpPath, "-vn", "-b:a", s.cfg.Bitrate, outPath,
+		"-i", tmpPath, "-vn", "-b:a", cfg.Bitrate, outPath,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Remove(outPath)
@@ -121,7 +146,7 @@ func (s *Storer) saveTranscoded(dir, projectID, subID, srcMime string, data []by
 	if err != nil {
 		return "", "", 0, err
 	}
-	return filepath.Join(projectID, outName), mimeForExt("." + s.cfg.Format), info.Size(), nil
+	return filepath.Join(projectID, outName), mimeForExt("." + cfg.Format), info.Size(), nil
 }
 
 // AbsPath returns the absolute path on disk for a stored relative path.

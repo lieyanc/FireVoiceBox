@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/lieyan666/firevoicebox/internal/config"
 	"github.com/lieyan666/firevoicebox/internal/store"
 	"github.com/lieyan666/firevoicebox/internal/version"
 )
@@ -44,6 +46,88 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"owner": true})
+}
+
+func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": s.cfg,
+	})
+}
+
+func (s *Server) handleUpdateAdminSettings(w http.ResponseWriter, r *http.Request) {
+	var next config.Config
+	if err := json.NewDecoder(r.Body).Decode(&next); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := normalizeAdminSettings(&next); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.cfg.Replace(next); err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to save settings")
+		return
+	}
+	s.audio.UpdateTranscodeConfig(s.cfg.Transcode)
+	s.setOwnerSession(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": s.cfg,
+	})
+}
+
+func normalizeAdminSettings(c *config.Config) error {
+	if strings.TrimSpace(c.Admin.Password) == "" {
+		return errors.New("admin password is required")
+	}
+
+	c.Server.Addr = strings.TrimSpace(c.Server.Addr)
+	c.Server.DataDir = strings.TrimSpace(c.Server.DataDir)
+	c.Server.Secret = strings.TrimSpace(c.Server.Secret)
+	if c.Server.MaxUploadMB < 1 {
+		return errors.New("max upload must be at least 1 MB")
+	}
+
+	c.Transcode.FFmpegPath = strings.TrimSpace(c.Transcode.FFmpegPath)
+	c.Transcode.Format = strings.ToLower(strings.TrimSpace(c.Transcode.Format))
+	c.Transcode.Bitrate = strings.TrimSpace(c.Transcode.Bitrate)
+	c.Transcode.OnError = strings.TrimSpace(c.Transcode.OnError)
+	if c.Transcode.Format != "" && !validTranscodeFormat(c.Transcode.Format) {
+		return errors.New("transcode format may only contain letters, numbers, dash, and underscore")
+	}
+	switch c.Transcode.OnError {
+	case "", "keep_original", "reject":
+	default:
+		return errors.New("transcode on_error must be keep_original or reject")
+	}
+
+	c.Update.Channel = strings.ToLower(strings.TrimSpace(c.Update.Channel))
+	c.Update.Tag = strings.TrimSpace(c.Update.Tag)
+	c.Update.Repo = strings.TrimSpace(c.Update.Repo)
+	if c.Update.Channel != "" && c.Update.Channel != "stable" && c.Update.Channel != "dev" {
+		return errors.New("update channel must be stable or dev")
+	}
+	if c.Update.CheckInterval < 1 {
+		return errors.New("update check interval must be at least 1 second")
+	}
+	return nil
+}
+
+func validTranscodeFormat(value string) bool {
+	if len(value) > 16 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return value != ""
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {

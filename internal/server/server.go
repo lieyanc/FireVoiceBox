@@ -56,7 +56,10 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Logger)
 
 	r.Route("/api", func(api chi.Router) {
+		api.Use(noStore)
+
 		// Public endpoints (no auth).
+		api.Get("/client/version", s.handleClientVersion)
 		api.Get("/p/{key}", s.handlePublicProject)
 		api.Post("/p/{key}/submissions", s.handleCreateSubmission)
 
@@ -72,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 			o.Post("/admin/projects", s.handleCreateProject)
 			o.Patch("/admin/projects/{id}", s.handleUpdateProject)
 			o.Delete("/admin/projects/{id}", s.handleDeleteProject)
+			o.Get("/admin/settings", s.handleAdminSettings)
+			o.Put("/admin/settings", s.handleUpdateAdminSettings)
 			o.Get("/admin/version", s.handleAdminVersion)
 			o.Get("/admin/update/status", s.handleAdminUpdateStatus)
 			o.Post("/admin/update/check", s.handleAdminUpdateCheck)
@@ -109,6 +114,7 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 	}
 	if f, err := s.dist.Open(p); err == nil {
 		f.Close()
+		setSPAFileCacheHeaders(w, r, p)
 		http.FileServer(http.FS(s.dist)).ServeHTTP(w, r)
 		return
 	}
@@ -116,6 +122,7 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 	// not exist should 404 rather than fall back to index.html — otherwise a
 	// stale/cache-busted chunk request would receive HTML with a 200 status.
 	if path.Ext(p) != "" {
+		setNoStoreHeaders(w, false)
 		http.NotFound(w, r)
 		return
 	}
@@ -131,6 +138,7 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "frontend not built", http.StatusInternalServerError)
 		return
 	}
+	setSPAFileCacheHeaders(w, r, "index.html")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)

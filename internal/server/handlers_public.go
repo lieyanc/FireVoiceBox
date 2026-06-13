@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lieyan666/firevoicebox/internal/store"
+	"github.com/lieyan666/firevoicebox/internal/version"
 )
 
 // publicProject is the project view exposed to the recording page.
@@ -21,6 +22,13 @@ type publicProject struct {
 	MaxDurationSec int    `json:"max_duration_sec"`
 	Status         string `json:"status"`
 	Accepting      bool   `json:"accepting"`
+}
+
+func (s *Server) handleClientVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"cache_key": version.ClientCacheKey(),
+	})
 }
 
 func (s *Server) handlePublicProject(w http.ResponseWriter, r *http.Request) {

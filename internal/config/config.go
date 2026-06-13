@@ -24,6 +24,8 @@ type Config struct {
 	Admin     AdminConfig     `json:"admin"`
 	Transcode TranscodeConfig `json:"transcode"`
 	Update    updater.Config  `json:"update"`
+
+	path string
 }
 
 // ServerConfig holds HTTP server and storage settings.
@@ -78,6 +80,7 @@ func Load(path string) (*Config, bool, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, false, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	c.path = path
 
 	c.applyDefaults()
 	changed := c.fillSecrets()
@@ -88,6 +91,22 @@ func Load(path string) (*Config, bool, error) {
 		}
 	}
 	return &c, created, nil
+}
+
+// Replace persists next to the same config file and swaps it into the live
+// config only after the file write succeeds.
+func (c *Config) Replace(next Config) error {
+	if c.path == "" {
+		return fmt.Errorf("config path is not set")
+	}
+	next.path = c.path
+	next.applyDefaults()
+	next.fillSecrets()
+	if err := next.save(next.path); err != nil {
+		return err
+	}
+	*c = next
+	return nil
 }
 
 func (c *Config) applyDefaults() {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
@@ -21,6 +22,12 @@ import (
 )
 
 func newIntegrationServer(t *testing.T) *httptest.Server {
+	return newIntegrationServerWithDist(t, fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html>spa</html>")},
+	})
+}
+
+func newIntegrationServerWithDist(t *testing.T, dist fs.FS) *httptest.Server {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "test.db"))
@@ -29,13 +36,15 @@ func newIntegrationServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	cfg := &config.Config{}
+	cfg, _, err := config.Load(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg.Server.Secret = "itest-secret"
 	cfg.Server.MaxUploadMB = 5
 	cfg.Admin.Password = "pw"
 	au := audio.New(filepath.Join(dir, "audio"), config.TranscodeConfig{})
 
-	dist := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html>spa</html>")}}
 	srv := New(cfg, st, au, dist)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -75,6 +84,72 @@ func decode[T any](t *testing.T, r *http.Response) T {
 	}
 	r.Body.Close()
 	return v
+}
+
+func TestCacheHeaders(t *testing.T) {
+	ts := newIntegrationServerWithDist(t, fstest.MapFS{
+		"index.html":             &fstest.MapFile{Data: []byte("<html>spa</html>")},
+		"assets/index-AbC123.js": &fstest.MapFile{Data: []byte(`console.log("ok")`)},
+		"favicon.ico":            &fstest.MapFile{Data: []byte("ico")},
+	})
+
+	get := func(path string) *http.Response {
+		t.Helper()
+		res, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	assertNoStore := func(path string, wantPrivate bool) {
+		t.Helper()
+		res := get(path)
+		defer res.Body.Close()
+		want := cacheControlNoStore
+		if wantPrivate {
+			want = cacheControlPrivateNoStore
+		}
+		if got := res.Header.Get("Cache-Control"); got != want {
+			t.Fatalf("%s Cache-Control=%q want %q", path, got, want)
+		}
+		if got := res.Header.Get("Pragma"); got != "no-cache" {
+			t.Fatalf("%s Pragma=%q want no-cache", path, got)
+		}
+		if got := res.Header.Get("Expires"); got != "0" {
+			t.Fatalf("%s Expires=%q want 0", path, got)
+		}
+	}
+
+	assertNoStore("/", false)
+	assertNoStore("/admin/projects/abc", false)
+	assertNoStore("/api/admin/me", true)
+
+	res := get("/api/client/version")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("client version status=%d", res.StatusCode)
+	}
+	if got := res.Header.Get("Cache-Control"); got != cacheControlPrivateNoStore {
+		t.Fatalf("client version Cache-Control=%q want %q", got, cacheControlPrivateNoStore)
+	}
+	clientVersion := decode[struct {
+		CacheKey string `json:"cache_key"`
+	}](t, res)
+	if clientVersion.CacheKey == "" {
+		t.Fatalf("client version cache_key is empty")
+	}
+
+	res = get("/admin?fvb_refresh=test")
+	if got := res.Header.Get("Clear-Site-Data"); got != `"cache"` {
+		t.Fatalf("Clear-Site-Data=%q want %q", got, `"cache"`)
+	}
+	res.Body.Close()
+
+	res = get("/assets/index-AbC123.js")
+	if got := res.Header.Get("Cache-Control"); got != cacheControlImmutableAsset {
+		t.Fatalf("asset Cache-Control=%q want %q", got, cacheControlImmutableAsset)
+	}
+	res.Body.Close()
 }
 
 func TestFullFlow(t *testing.T) {
@@ -242,5 +317,80 @@ func TestDurationLimitRejected(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 400 {
 		t.Fatalf("over-duration status=%d want 400", res.StatusCode)
+	}
+}
+
+func TestAdminSettingsCanBeUpdated(t *testing.T) {
+	ts := newIntegrationServer(t)
+	c := authedClient(t)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/admin/login", strings.NewReader(`{"password":"pw"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, _ := c.Do(req)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("login status=%d", res.StatusCode)
+	}
+
+	res, _ = c.Get(ts.URL + "/api/admin/settings")
+	if res.StatusCode != 200 {
+		t.Fatalf("settings status=%d", res.StatusCode)
+	}
+	body := decode[struct {
+		Settings config.Config `json:"settings"`
+	}](t, res)
+	next := body.Settings
+	next.Admin.Password = "new-pw"
+	next.Server.MaxUploadMB = 7
+	next.Server.Secret = ""
+	next.Transcode.Enabled = true
+	next.Transcode.Format = "wav"
+	next.Transcode.Bitrate = "96k"
+	next.Transcode.OnError = "reject"
+	next.Update.Enabled = true
+	next.Update.Channel = "dev"
+	next.Update.CheckInterval = 120
+	next.Update.Repo = "owner/repo"
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(next); err != nil {
+		t.Fatal(err)
+	}
+	req, _ = http.NewRequest("PUT", ts.URL+"/api/admin/settings", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	res, _ = c.Do(req)
+	if res.StatusCode != 200 {
+		t.Fatalf("update settings status=%d", res.StatusCode)
+	}
+	updated := decode[struct {
+		Settings config.Config `json:"settings"`
+	}](t, res)
+	if updated.Settings.Admin.Password != "new-pw" || updated.Settings.Server.MaxUploadMB != 7 {
+		t.Fatalf("settings not updated: %+v", updated.Settings)
+	}
+	if updated.Settings.Server.Secret == "" {
+		t.Fatalf("server secret was not regenerated")
+	}
+
+	res, _ = c.Get(ts.URL + "/api/admin/me")
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("session after secret change status=%d", res.StatusCode)
+	}
+
+	fresh := authedClient(t)
+	req, _ = http.NewRequest("POST", ts.URL+"/api/admin/login", strings.NewReader(`{"password":"pw"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, _ = fresh.Do(req)
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("old password status=%d want 401", res.StatusCode)
+	}
+	req, _ = http.NewRequest("POST", ts.URL+"/api/admin/login", strings.NewReader(`{"password":"new-pw"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, _ = fresh.Do(req)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("new password status=%d", res.StatusCode)
 	}
 }

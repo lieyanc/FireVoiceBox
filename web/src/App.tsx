@@ -2,8 +2,11 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { RecordPage } from '@/pages/RecordPage'
 import { AdminHome } from '@/pages/AdminHome'
 import { ManageView } from '@/pages/ManageView'
+import { useClientCacheRefresh } from '@/lib/client-cache'
 
 export default function App() {
+  useClientCacheRefresh()
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/admin" replace />} />

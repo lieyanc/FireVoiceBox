@@ -134,6 +134,24 @@ server {
 
 Keep `server.trusted_proxy: true` with either proxy. Run the binary under systemd (or any supervisor); it shuts down gracefully on SIGTERM.
 
+### CDN cache policy
+
+FireVoiceBox sets origin cache headers that are safe to pass through a CDN:
+
+| Path | Cache policy |
+| --- | --- |
+| `/assets/*` | `public, max-age=31536000, immutable` because Vite emits content-hashed filenames. |
+| `/`, `/index.html`, SPA routes | `no-store, max-age=0` so a deploy or OTA update can replace the client entry point immediately. |
+| `/api/*` | `private, no-store, max-age=0` because responses can contain project data, sessions, exports, or token-protected audio. |
+
+Configure the CDN to respect the origin `Cache-Control` header, and avoid a
+blanket "cache everything" rule for HTML or `/api/*`. When the admin update
+page detects that the backend has switched versions, it reloads the current URL
+with `fvb_refresh=<version>`; that response also sends
+`Clear-Site-Data: "cache"` to ask browsers to drop origin caches before loading
+the fresh app. Other open client pages poll `/api/client/version` and use the
+same refresh path when they see a new client cache key.
+
 ### systemd unit (example)
 
 ```ini
