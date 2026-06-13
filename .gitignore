@@ -49,6 +49,8 @@ firevoicebox-linux-*
 web/node_modules/
 web/.vite/
 *.tsbuildinfo
-# NOTE: internal/web/dist/ (the built UI) IS committed so that `go build` and
-# `go test` work on a fresh clone without Node installed, and the binary always
-# embeds a real UI. Rebuild it with `pnpm --dir web build` (or `make web`).
+# Built UI output — produced by `make web` / `pnpm --dir web build` and rebuilt
+# in CI before `go build`. Never committed; gitignored to avoid churning hashes.
+# `make` materializes a placeholder (from internal/web/placeholder.html) so that
+# `//go:embed all:dist` still compiles on a bare checkout.
+internal/web/dist/

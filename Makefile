@@ -10,7 +10,7 @@ BUILD_TIME ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 VERSION_PKG := github.com/lieyan666/firevoicebox/internal/version
 LD_VERSION_FLAGS := -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
-.PHONY: all build web backend run dev test clean tidy release
+.PHONY: all build web ensure-dist backend run dev test clean tidy release
 
 all: build
 
@@ -22,8 +22,15 @@ web:
 	cd $(WEB) && pnpm install --frozen-lockfile || pnpm install
 	cd $(WEB) && pnpm build
 
+## ensure-dist: drop a placeholder UI into internal/web/dist so the Go
+## `//go:embed all:dist` compiles even before the frontend is built. The real
+## assets are produced by `make web` (or CI) and overwrite this.
+ensure-dist:
+	@mkdir -p internal/web/dist
+	@test -f internal/web/dist/index.html || cp internal/web/placeholder.html internal/web/dist/index.html
+
 ## backend: compile the Go binary (assumes internal/web/dist is present)
-backend:
+backend: ensure-dist
 	go build -ldflags="$(LD_VERSION_FLAGS)" -o $(BINARY) $(PKG)
 
 ## run: build everything and run it
@@ -42,7 +49,7 @@ web-dev:
 	cd $(WEB) && pnpm dev
 
 ## test: run Go tests
-test:
+test: ensure-dist
 	go test ./...
 
 ## tidy: tidy go modules
@@ -56,4 +63,4 @@ release: web
 ## clean: remove build artifacts
 clean:
 	rm -rf bin
-	rm -rf internal/web/dist/assets
+	rm -rf internal/web/dist
