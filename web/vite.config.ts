@@ -14,6 +14,7 @@ export default defineConfig({
     // Emit straight into the Go embed directory so the binary bundles the UI.
     outDir: fileURLToPath(new URL('../internal/web/dist', import.meta.url)),
     emptyOutDir: true,
+    assetsDir: 'assets/vite',
   },
   server: {
     proxy: {

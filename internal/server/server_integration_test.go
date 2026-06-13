@@ -88,9 +88,10 @@ func decode[T any](t *testing.T, r *http.Response) T {
 
 func TestCacheHeaders(t *testing.T) {
 	ts := newIntegrationServerWithDist(t, fstest.MapFS{
-		"index.html":             &fstest.MapFile{Data: []byte("<html>spa</html>")},
-		"assets/index-AbC123.js": &fstest.MapFile{Data: []byte(`console.log("ok")`)},
-		"favicon.ico":            &fstest.MapFile{Data: []byte("ico")},
+		"index.html":                  &fstest.MapFile{Data: []byte("<html>spa</html>")},
+		"assets/vite/index-AbC123.js": &fstest.MapFile{Data: []byte(`console.log("ok")`)},
+		"assets/manual-download.txt":  &fstest.MapFile{Data: []byte("not a vite hash asset")},
+		"favicon.ico":                 &fstest.MapFile{Data: []byte("ico")},
 	})
 
 	get := func(path string) *http.Response {
@@ -145,11 +146,13 @@ func TestCacheHeaders(t *testing.T) {
 	}
 	res.Body.Close()
 
-	res = get("/assets/index-AbC123.js")
+	res = get("/assets/vite/index-AbC123.js")
 	if got := res.Header.Get("Cache-Control"); got != cacheControlImmutableAsset {
 		t.Fatalf("asset Cache-Control=%q want %q", got, cacheControlImmutableAsset)
 	}
 	res.Body.Close()
+
+	assertNoStore("/assets/manual-download.txt", false)
 }
 
 func TestFullFlow(t *testing.T) {

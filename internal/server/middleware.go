@@ -13,6 +13,7 @@ const (
 	cacheControlNoStore        = "no-store, max-age=0"
 	cacheControlPrivateNoStore = "private, no-store, max-age=0"
 	forceRefreshQueryParam     = "fvb_refresh"
+	viteAssetPathPrefix        = "assets/vite/"
 )
 
 func noStore(next http.Handler) http.Handler {
@@ -33,7 +34,7 @@ func setNoStoreHeaders(w http.ResponseWriter, private bool) {
 }
 
 func setSPAFileCacheHeaders(w http.ResponseWriter, r *http.Request, p string) {
-	if strings.HasPrefix(p, "assets/") {
+	if strings.HasPrefix(p, viteAssetPathPrefix) {
 		w.Header().Set("Cache-Control", cacheControlImmutableAsset)
 		return
 	}
