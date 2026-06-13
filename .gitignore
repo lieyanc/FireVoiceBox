@@ -34,7 +34,7 @@ go.work.sum
 # --- FireVoiceBox ---
 # Compiled binaries
 /bin/
-firevoicebox
+/firevoicebox
 firevoicebox-linux-*
 
 # Runtime data (self-released config, SQLite db, uploaded audio)
