@@ -25,9 +25,13 @@ type publicProject struct {
 }
 
 func (s *Server) handleClientVersion(w http.ResponseWriter, r *http.Request) {
+	// The version string is exposed publicly so the embedded UI can display the
+	// exact CI build it is running; it is already published in the GitHub release.
+	info := version.Info()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"cache_key": version.ClientCacheKey(),
+		"version":   info["version"],
 	})
 }
 

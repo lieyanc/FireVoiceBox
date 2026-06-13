@@ -1,7 +1,13 @@
 // A small, self-contained footer that credits the project.
 //
-// The version and git hash are injected at build time (see vite.config.ts
-// `define`), so the footer shows the exact build without any runtime lookup.
+// The UI is bundled into the Go binary and built before the binary's version
+// is stamped (see the cross-compile workflow's -ldflags), so the real build
+// identifier (e.g. dev-0042-20260613-6d866aa) only exists server-side. We
+// fetch it from /api/client/version at runtime rather than baking in a
+// package.json version that never reflects the CI build.
+import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
+
 const REPO_URL = 'https://github.com/lieyanc/FireVoiceBox'
 const REPO_SLUG = 'lieyanc/FireVoiceBox'
 
@@ -15,6 +21,23 @@ function GithubMark({ className }: { className?: string }) {
 }
 
 export function AppFooter({ className = '' }: { className?: string }) {
+  const [version, setVersion] = useState<string>('')
+
+  useEffect(() => {
+    let active = true
+    api
+      .clientVersion()
+      .then((data) => {
+        if (active) setVersion(data.version || '')
+      })
+      .catch(() => {
+        // The page is unusable if the API is down; just hide the version.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
   return (
     <footer
       className={`flex flex-wrap items-center justify-center gap-1.5 text-xs text-muted-foreground ${className}`}
@@ -28,13 +51,14 @@ export function AppFooter({ className = '' }: { className?: string }) {
         <GithubMark className="h-3.5 w-3.5" />
         <span>{REPO_SLUG}</span>
       </a>
-      <span aria-hidden className="text-muted-foreground/40">
-        ·
-      </span>
-      <span className="inline-flex items-baseline gap-1 tabular-nums">
-        v{__APP_VERSION__}
-        <span className="font-mono text-[11px] text-muted-foreground/60">{__APP_GIT_HASH__}</span>
-      </span>
+      {version && (
+        <>
+          <span aria-hidden className="text-muted-foreground/40">
+            ·
+          </span>
+          <span className="font-mono tabular-nums">{version}</span>
+        </>
+      )}
     </footer>
   )
 }

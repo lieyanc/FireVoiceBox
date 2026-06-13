@@ -69,6 +69,7 @@ export interface UpdateCheckResult {
 export interface ClientVersion {
   ok: boolean
   cache_key: string
+  version: string
 }
 
 export interface AppSettings {
