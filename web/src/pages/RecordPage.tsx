@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/components/ui/toast'
+import { AppFooter } from '@/components/AppFooter'
 import { formatDuration } from '@/lib/format'
 
 function extForMime(mime: string): string {
@@ -138,7 +139,7 @@ export function RecordPage() {
                   id="student"
                   value={studentId}
                   onChange={(e) => setStudentId(e.target.value)}
-                  placeholder="例如 2021xxxx"
+                  placeholder="例如 23xxxx"
                   maxLength={64}
                   inputMode="text"
                 />
@@ -242,7 +243,7 @@ export function RecordPage() {
         )}
       </main>
 
-      <footer className="mt-8 text-center text-xs text-muted-foreground">FireVoiceBox</footer>
+      <AppFooter className="mt-8" />
     </div>
   )
 }

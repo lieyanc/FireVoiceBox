@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Waveform } from '@/components/Waveform'
 import { ProjectFormDialog } from '@/components/ProjectFormDialog'
+import { AppFooter } from '@/components/AppFooter'
 import { useToast } from '@/components/ui/toast'
 import { formatBytes, formatDateTime, formatDuration } from '@/lib/format'
 
@@ -253,6 +254,8 @@ export function ManageView({ fromHash = false }: { fromHash?: boolean }) {
         initial={project}
         onSubmit={handleEdit}
       />
+
+      <AppFooter className="mt-10" />
     </div>
   )
 }

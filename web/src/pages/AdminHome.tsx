@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
 import { ProjectFormDialog } from '@/components/ProjectFormDialog'
+import { AppFooter } from '@/components/AppFooter'
 import { formatDateTime, formatDuration } from '@/lib/format'
 import { UpdatePanel } from '@/pages/UpdatePanel'
 import { SettingsPanel } from '@/pages/SettingsPanel'
@@ -212,6 +213,8 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
       )}
 
       <ProjectFormDialog mode="create" open={createOpen} onOpenChange={setCreateOpen} onSubmit={handleCreate} />
+
+      <AppFooter className="mt-10" />
     </div>
   )
 }
