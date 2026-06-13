@@ -76,6 +76,13 @@ The config file is JSON. It is created automatically on first run; you can also 
     "format": "mp3",
     "bitrate": "128k",
     "on_error": "keep_original" // on transcode failure: "keep_original" or "reject"
+  },
+  "update": {
+    "enabled": false,         // enable background OTA checks
+    "channel": "stable",      // "stable" = latest v* release; "dev" = dev prerelease
+    "check_interval": 3600,   // seconds between background checks
+    "proxy_base_url": "https://dl.repo.chycloud.top",
+    "repo": "lieyanc/FireVoiceBox"
   }
 }
 ```
@@ -145,6 +152,27 @@ WantedBy=multi-user.target
 
 **Backups:** everything lives under `data_dir` — `data/firevoicebox.db` plus `data/audio/`. Copy/rsync that directory.
 
+### CI and OTA updates
+
+GitHub Actions builds release binaries via `.github/workflows/cross-compile.yml`.
+On pushes to `main`, it runs the frontend build and Go tests, cross-compiles
+Linux (`amd64`, `arm64`) and macOS (`amd64`, `arm64`) binaries, uploads
+`.sha256` checksums, and refreshes the fixed `dev` prerelease with
+`version.json`. Tags matching `v*` publish stable releases and mark them as
+latest.
+
+The admin backend exposes a **系统更新** panel. It checks the configured repo
+through `update.proxy_base_url`, downloads the matching `firevoicebox-<target>`
+asset, verifies the checksum, and restarts into the new binary. Stable updates
+apply immediately after download; dev updates wait for admin confirmation.
+
+For local smoke tests of published assets:
+
+```bash
+scripts/fetch-latest-build.sh --download-only
+scripts/fetch-latest-build.sh --stable -- -config config.json
+```
+
 ---
 
 ## How it works
@@ -172,6 +200,8 @@ web/                   React + TS + Tailwind + shadcn-style UI + wavesurfer.js
 | `GET /api/manage/submissions/{id}/audio` | owner **or** token | Stream audio (supports HTTP Range) |
 | `DELETE /api/manage/submissions/{id}` | owner **or** token | Delete a submission |
 | `GET /api/manage/projects/{id}/export` | owner **or** token | Download ZIP (audio + `metadata.csv`) |
+| `GET /api/admin/version` | owner | Current binary version and OTA repo/channel. |
+| `GET/POST /api/admin/update/*` | owner | Check, download, apply, or dismiss OTA updates. |
 
 Manage-token requests carry the token via the `X-Manage-Token` header or `?key=` query parameter (the share link puts it in the URL hash, and the SPA forwards it).
 

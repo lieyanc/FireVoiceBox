@@ -1,0 +1,234 @@
+name: Cross Compile
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  meta:
+    name: Build Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+    steps:
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            DATE="$(date -u +'%Y%m%d')"
+            RUN_NUM="$(printf '%04d' "${GITHUB_RUN_NUMBER}")"
+            VERSION="dev-${RUN_NUM}-${DATE}-${SHORT_SHA}"
+          else
+            VERSION="dev"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Run Go tests
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    needs:
+      - meta
+      - test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+          - target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          VERSION="${{ needs.meta.outputs.version }}"
+          COMMIT="${{ needs.meta.outputs.commit }}"
+          BUILD_TIME="${{ needs.meta.outputs.build_time }}"
+          PKG="github.com/lieyan666/firevoicebox/internal/version"
+
+          BIN="firevoicebox-${{ matrix.target }}"
+          go build -trimpath \
+            -ldflags="-s -w -X ${PKG}.Version=${VERSION} -X ${PKG}.Commit=${COMMIT} -X ${PKG}.BuildTime=${BUILD_TIME}" \
+            -o "dist/${BIN}" ./cmd/firevoicebox
+          (
+            cd dist
+            sha256sum "${BIN}" > "${BIN}.sha256"
+          )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firevoicebox-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  release-dev:
+    name: Publish Dev Release
+    runs-on: ubuntu-latest
+    needs:
+      - meta
+      - build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${{ needs.meta.outputs.commit }}"
+          echo "tag=dev" >> "$GITHUB_OUTPUT"
+          echo "title=Dev Build #${GITHUB_RUN_NUMBER} (${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: firevoicebox-*
+          path: release
+          merge-multiple: true
+
+      - name: Add version metadata
+        run: |
+          set -euo pipefail
+          cat > release/version.json <<'EOF'
+          {
+            "version": "${{ needs.meta.outputs.version }}",
+            "commit": "${{ needs.meta.outputs.commit }}",
+            "build_time": "${{ needs.meta.outputs.build_time }}",
+            "tag": "dev"
+          }
+          EOF
+
+      - name: Refresh dev tag and prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete dev --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
+          git tag -f dev "${GITHUB_SHA}"
+          git push --force origin refs/tags/dev
+          gh release create dev release/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${{ steps.meta.outputs.title }}" \
+            --notes "Dev build for ${GITHUB_SHA}" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --latest=false
+
+  release-prod:
+    name: Publish Prod Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: firevoicebox-*
+          path: release
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          prerelease: false
+          generate_release_notes: true
+          make_latest: true
+          files: release/*

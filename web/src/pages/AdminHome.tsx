@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, LogOut, Loader2, Mic, Lock } from 'lucide-react'
+import { Plus, LogOut, Loader2, Mic, Lock, RefreshCw } from 'lucide-react'
 import { api, ApiError, type Project } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
 import { ProjectFormDialog } from '@/components/ProjectFormDialog'
 import { formatDateTime, formatDuration } from '@/lib/format'
+import { UpdatePanel } from '@/pages/UpdatePanel'
 
 export function AdminHome() {
   const [authed, setAuthed] = useState<boolean | null>(null)
@@ -86,6 +87,7 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
   const { error, success } = useToast()
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [view, setView] = useState<'projects' | 'update'>('projects')
 
   async function load() {
     try {
@@ -118,59 +120,85 @@ function ProjectList({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="container py-8">
-      <header className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Mic className="h-6 w-6" />
-          <h1 className="text-xl font-bold">FireVoiceBox</h1>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Mic className="h-6 w-6" />
+            <h1 className="text-xl font-bold">FireVoiceBox</h1>
+          </div>
+          <div className="flex items-center gap-1 rounded-md border border-border p-1">
+            <Button
+              size="sm"
+              variant={view === 'projects' ? 'secondary' : 'ghost'}
+              onClick={() => setView('projects')}
+            >
+              <Mic className="h-4 w-4" /> 项目
+            </Button>
+            <Button
+              size="sm"
+              variant={view === 'update' ? 'secondary' : 'ghost'}
+              onClick={() => setView('update')}
+            >
+              <RefreshCw className="h-4 w-4" /> 更新
+            </Button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> 新建项目
-          </Button>
+          {view === 'projects' && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" /> 新建项目
+            </Button>
+          )}
           <Button variant="ghost" size="icon" onClick={logout} aria-label="退出登录">
             <LogOut className="h-4 w-4" />
           </Button>
         </div>
       </header>
 
-      {projects === null ? (
-        <div className="flex justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : projects.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-            <p className="text-muted-foreground">还没有项目，点击右上角新建一个吧。</p>
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4" /> 新建项目
-            </Button>
-          </CardContent>
-        </Card>
+      {view === 'update' ? (
+        <UpdatePanel />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((p) => (
-            <Link key={p.id} to={`/admin/projects/${p.id}`}>
-              <Card className="h-full transition-colors hover:border-primary/50">
-                <CardHeader>
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="truncate text-lg">{p.title}</CardTitle>
-                    <Badge variant={p.status === 'open' ? 'success' : 'secondary'}>
-                      {p.status === 'open' ? '收集中' : '已关闭'}
-                    </Badge>
-                  </div>
-                  {p.description && <CardDescription className="line-clamp-2">{p.description}</CardDescription>}
-                </CardHeader>
-                <CardContent className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{p.submission_count} 条投稿</span>
-                  <span>≤ {formatDuration(p.max_duration_sec)}</span>
-                </CardContent>
-                <CardContent className="pt-0 text-xs text-muted-foreground">
-                  创建于 {formatDateTime(p.created_at)}
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+        <>
+          {projects === null ? (
+            <div className="flex justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : projects.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+                <p className="text-muted-foreground">还没有项目，点击右上角新建一个吧。</p>
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus className="h-4 w-4" /> 新建项目
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {projects.map((p) => (
+                <Link key={p.id} to={`/admin/projects/${p.id}`}>
+                  <Card className="h-full transition-colors hover:border-primary/50">
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-2">
+                        <CardTitle className="truncate text-lg">{p.title}</CardTitle>
+                        <Badge variant={p.status === 'open' ? 'success' : 'secondary'}>
+                          {p.status === 'open' ? '收集中' : '已关闭'}
+                        </Badge>
+                      </div>
+                      {p.description && <CardDescription className="line-clamp-2">{p.description}</CardDescription>}
+                    </CardHeader>
+                    <CardContent className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span>{p.submission_count} 条投稿</span>
+                      <span>≤ {formatDuration(p.max_duration_sec)}</span>
+                    </CardContent>
+                    <CardContent className="pt-0 text-xs text-muted-foreground">
+                      创建于 {formatDateTime(p.created_at)}
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <ProjectFormDialog mode="create" open={createOpen} onOpenChange={setCreateOpen} onSubmit={handleCreate} />

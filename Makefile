@@ -4,6 +4,11 @@
 BINARY := bin/firevoicebox
 PKG := ./cmd/firevoicebox
 WEB := web
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+VERSION_PKG := github.com/lieyan666/firevoicebox/internal/version
+LD_VERSION_FLAGS := -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
 .PHONY: all build web backend run dev test clean tidy release
 
@@ -19,7 +24,7 @@ web:
 
 ## backend: compile the Go binary (assumes internal/web/dist is present)
 backend:
-	go build -o $(BINARY) $(PKG)
+	go build -ldflags="$(LD_VERSION_FLAGS)" -o $(BINARY) $(PKG)
 
 ## run: build everything and run it
 run: build
@@ -46,7 +51,7 @@ tidy:
 
 ## release: cross-compile a static linux/amd64 binary for server deployment
 release: web
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BINARY)-linux-amd64 $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w $(LD_VERSION_FLAGS)" -o $(BINARY)-linux-amd64 $(PKG)
 
 ## clean: remove build artifacts
 clean:

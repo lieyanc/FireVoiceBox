@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lieyan666/firevoicebox/internal/store"
+	"github.com/lieyan666/firevoicebox/internal/version"
 )
 
 // ownerProjectView is the full project representation returned to the owner,
@@ -191,5 +192,55 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	// Best-effort removal of the project's audio directory.
 	_ = s.audio.RemoveProject(id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAdminVersion(w http.ResponseWriter, r *http.Request) {
+	info := version.Info()
+	info["update_channel"] = s.cfg.Update.Channel
+	info["update_repo"] = s.cfg.Update.Repo
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": info})
+}
+
+func (s *Server) handleAdminUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": s.updater.Status(),
+	})
+}
+
+func (s *Server) handleAdminUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	result, err := s.updater.CheckOnly(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     false,
+			"result": result,
+			"error":  err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+}
+
+func (s *Server) handleAdminUpdateApply(w http.ResponseWriter, r *http.Request) {
+	status := s.updater.Status()
+	if status.State == "ready" {
+		if err := s.updater.ApplyPending(r.Context()); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "applying"})
+		return
+	}
+	if status.State == "checking" || status.State == "downloading" || status.State == "applying" {
+		writeErr(w, http.StatusConflict, "update already in progress")
+		return
+	}
+	s.updater.StartUpdate(r.Context())
+	writeJSON(w, http.StatusOK, map[string]string{"status": "update_started"})
+}
+
+func (s *Server) handleAdminUpdateDismiss(w http.ResponseWriter, r *http.Request) {
+	s.updater.DismissPending()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/lieyan666/firevoicebox/internal/updater"
 )
 
 //go:embed template.json
@@ -21,6 +23,7 @@ type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Admin     AdminConfig     `json:"admin"`
 	Transcode TranscodeConfig `json:"transcode"`
+	Update    updater.Config  `json:"update"`
 }
 
 // ServerConfig holds HTTP server and storage settings.
@@ -108,6 +111,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Transcode.OnError == "" {
 		c.Transcode.OnError = "keep_original"
+	}
+	if c.Update.Channel == "" {
+		c.Update.Channel = "stable"
+	}
+	if c.Update.CheckInterval <= 0 {
+		c.Update.CheckInterval = 3600
+	}
+	if c.Update.ProxyBaseURL == "" {
+		c.Update.ProxyBaseURL = "https://dl.repo.chycloud.top"
+	}
+	if c.Update.Repo == "" {
+		c.Update.Repo = "lieyanc/FireVoiceBox"
 	}
 }
 

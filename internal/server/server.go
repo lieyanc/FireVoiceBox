@@ -14,19 +14,36 @@ import (
 	"github.com/lieyan666/firevoicebox/internal/audio"
 	"github.com/lieyan666/firevoicebox/internal/config"
 	"github.com/lieyan666/firevoicebox/internal/store"
+	"github.com/lieyan666/firevoicebox/internal/updater"
 )
 
 // Server holds shared dependencies for HTTP handlers.
 type Server struct {
-	cfg   *config.Config
-	st    *store.Store
-	audio *audio.Storer
-	dist  fs.FS // embedded frontend (the "dist" subtree)
+	cfg     *config.Config
+	st      *store.Store
+	audio   *audio.Storer
+	dist    fs.FS // embedded frontend (the "dist" subtree)
+	updater *updater.Updater
 }
 
 // New constructs a Server.
 func New(cfg *config.Config, st *store.Store, au *audio.Storer, dist fs.FS) *Server {
-	return &Server{cfg: cfg, st: st, audio: au, dist: dist}
+	s := &Server{cfg: cfg, st: st, audio: au, dist: dist}
+	s.updater = updater.New(
+		func() updater.Config { return cfg.Update },
+		func() string { return cfg.Server.DataDir },
+		log.Default(),
+		updater.RestartHooks{},
+	)
+	return s
+}
+
+// SetUpdater replaces the default updater. The main program uses this to
+// install restart hooks that gracefully stop HTTP and close the database.
+func (s *Server) SetUpdater(u *updater.Updater) {
+	if u != nil {
+		s.updater = u
+	}
 }
 
 // Handler builds the root http.Handler with all routes mounted.
@@ -55,6 +72,11 @@ func (s *Server) Handler() http.Handler {
 			o.Post("/admin/projects", s.handleCreateProject)
 			o.Patch("/admin/projects/{id}", s.handleUpdateProject)
 			o.Delete("/admin/projects/{id}", s.handleDeleteProject)
+			o.Get("/admin/version", s.handleAdminVersion)
+			o.Get("/admin/update/status", s.handleAdminUpdateStatus)
+			o.Post("/admin/update/check", s.handleAdminUpdateCheck)
+			o.Post("/admin/update/apply", s.handleAdminUpdateApply)
+			o.Post("/admin/update/dismiss", s.handleAdminUpdateDismiss)
 		})
 
 		// Project management (owner OR valid manage token).

@@ -40,6 +40,7 @@ firevoicebox-linux-*
 # Runtime data (self-released config, SQLite db, uploaded audio)
 /config.json
 /data/
+/test/
 *.db
 *.db-shm
 *.db-wal
@@ -51,4 +52,3 @@ web/.vite/
 # NOTE: internal/web/dist/ (the built UI) IS committed so that `go build` and
 # `go test` work on a fresh clone without Node installed, and the binary always
 # embeds a real UI. Rebuild it with `pnpm --dir web build` (or `make web`).
-

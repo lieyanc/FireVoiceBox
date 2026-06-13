@@ -15,5 +15,12 @@
     "format": "mp3",
     "bitrate": "128k",
     "on_error": "keep_original"
+  },
+  "update": {
+    "enabled": false,
+    "channel": "stable",
+    "check_interval": 3600,
+    "proxy_base_url": "https://dl.repo.chycloud.top",
+    "repo": "lieyanc/FireVoiceBox"
   }
 }

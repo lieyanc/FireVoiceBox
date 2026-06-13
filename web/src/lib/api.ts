@@ -37,6 +37,35 @@ export interface Submission {
   audio_path: string
 }
 
+export interface VersionInfo {
+  version: string
+  commit: string
+  build_time: string
+  update_channel: string
+  update_repo: string
+}
+
+export interface UpdateStatus {
+  state: string
+  current_version: string
+  latest_version?: string
+  is_prerelease?: boolean
+  progress?: number
+  download_progress?: number
+  error?: string
+  last_check?: string
+  release_notes?: string
+}
+
+export interface UpdateCheckResult {
+  has_update: boolean
+  current_version: string
+  latest_version?: string
+  is_prerelease?: boolean
+  release_notes?: string
+  channel: string
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -105,6 +134,20 @@ export const api = {
     }),
   deleteProject: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/projects/${id}`, { method: 'DELETE' }),
+  version: () => request<{ ok: boolean; version: VersionInfo }>(`/api/admin/version`),
+  updateStatus: () => request<{ ok: boolean; status: UpdateStatus }>(`/api/admin/update/status`),
+  checkUpdate: () =>
+    request<{ ok: boolean; result: UpdateCheckResult; error?: string }>(`/api/admin/update/check`, {
+      method: 'POST',
+    }),
+  applyUpdate: () =>
+    request<{ ok?: boolean; status: string }>(`/api/admin/update/apply`, {
+      method: 'POST',
+    }),
+  dismissUpdate: () =>
+    request<{ ok: boolean }>(`/api/admin/update/dismiss`, {
+      method: 'POST',
+    }),
 
   // Project management (owner cookie OR manage token)
   getManageProject: (id: string, token?: string) =>
