@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/lieyan666/firevoicebox/internal/version"
@@ -24,6 +25,7 @@ func TestCheckOnlyResolvesLatestStableReleaseWithoutAPI(t *testing.T) {
 	targetName := testTargetName(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubNoCacheHeaders(t, r)
 		switch r.URL.Path {
 		case "/owner/repo/releases/latest/download/" + targetName:
 			if r.Method != http.MethodHead {
@@ -220,6 +222,7 @@ func TestPerformUpdateDownloadsAndVerifiesPrerelease(t *testing.T) {
 	sum := fmt.Sprintf("%x", sha256.Sum256(binary))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubNoCacheHeaders(t, r)
 		switch r.URL.Path {
 		case "/owner/repo/releases/download/" + tag + "/" + targetName:
 			if r.Method == http.MethodHead {
@@ -321,4 +324,21 @@ func testUpdater(cfg Config) *Updater {
 		log.New(io.Discard, "", 0),
 		RestartHooks{},
 	)
+}
+
+func assertGitHubNoCacheHeaders(t *testing.T, r *http.Request) {
+	t.Helper()
+
+	cacheControl := r.Header.Get("Cache-Control")
+	for _, directive := range []string{"no-cache", "no-store", "max-age=0"} {
+		if !strings.Contains(cacheControl, directive) {
+			t.Fatalf("expected Cache-Control to include %q, got %q", directive, cacheControl)
+		}
+	}
+	if got := r.Header.Get("Pragma"); got != "no-cache" {
+		t.Fatalf("expected Pragma no-cache, got %q", got)
+	}
+	if got := r.Header.Get("Expires"); got != "0" {
+		t.Fatalf("expected Expires 0, got %q", got)
+	}
 }

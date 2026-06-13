@@ -83,6 +83,17 @@ const (
 
 var githubReleaseBaseURL = "https://github.com"
 
+func newGitHubRequestWithContext(ctx context.Context, method, rawURL string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cache-Control", "no-cache, no-store, max-age=0")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Expires", "0")
+	return req, nil
+}
+
 func New(cfg func() Config, dataDir func() string, logger *log.Logger, hooks RestartHooks) *Updater {
 	if logger == nil {
 		logger = log.Default()
@@ -410,7 +421,7 @@ func (u *Updater) checkForUpdate(ctx context.Context, cfg Config) (*releaseInfo,
 
 func (u *Updater) loadReleaseVersion(ctx context.Context, cfg Config, release *releaseInfo) error {
 	versionURL := releaseDownloadURL(cfg.Repo, release.TagName, "version.json")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
+	req, err := newGitHubRequestWithContext(ctx, http.MethodGet, versionURL)
 	if err != nil {
 		return err
 	}
@@ -444,7 +455,7 @@ func (u *Updater) resolveReleaseTag(ctx context.Context, cfg Config, targetName 
 }
 
 func (u *Updater) resolveLatestStableTag(ctx context.Context, repo, targetName string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, latestReleaseDownloadURL(repo, targetName), nil)
+	req, err := newGitHubRequestWithContext(ctx, http.MethodHead, latestReleaseDownloadURL(repo, targetName))
 	if err != nil {
 		return "", err
 	}
@@ -484,7 +495,7 @@ func (u *Updater) resolveLatestStableTag(ctx context.Context, repo, targetName s
 }
 
 func (u *Updater) ensureAssetAvailable(ctx context.Context, assetURL string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, assetURL, nil)
+	req, err := newGitHubRequestWithContext(ctx, http.MethodHead, assetURL)
 	if err != nil {
 		return err
 	}
@@ -704,7 +715,7 @@ func (u *Updater) download(ctx context.Context, cfg Config, release *releaseInfo
 }
 
 func (u *Updater) downloadFile(ctx context.Context, url, destPath string, expectedSize int64) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := newGitHubRequestWithContext(ctx, http.MethodGet, url)
 	if err != nil {
 		return err
 	}
@@ -765,7 +776,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string, expect
 }
 
 func (u *Updater) fetchSHA256(ctx context.Context, url string) (string, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := newGitHubRequestWithContext(ctx, http.MethodGet, url)
 	if err != nil {
 		return "", false, err
 	}
