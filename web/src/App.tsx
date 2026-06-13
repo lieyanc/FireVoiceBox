@@ -3,21 +3,26 @@ import { RecordPage } from '@/pages/RecordPage'
 import { AdminHome } from '@/pages/AdminHome'
 import { ManageView } from '@/pages/ManageView'
 import { useClientCacheRefresh } from '@/lib/client-cache'
+import { UpdateBanner } from '@/components/UpdateBanner'
 
 export default function App() {
   useClientCacheRefresh()
 
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/admin" replace />} />
-      <Route path="/r/:key" element={<RecordPage />} />
-      <Route path="/admin" element={<AdminHome />} />
-      {/* Owner-authenticated project detail (uses session cookie). */}
-      <Route path="/admin/projects/:id" element={<ManageView />} />
-      {/* Token-shared project view (manage token comes from the URL hash). */}
-      <Route path="/admin/p/:id" element={<ManageView fromHash />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <>
+      {/* Shown across all routes when the server reports a newer build. */}
+      <UpdateBanner />
+      <Routes>
+        <Route path="/" element={<Navigate to="/admin" replace />} />
+        <Route path="/r/:key" element={<RecordPage />} />
+        <Route path="/admin" element={<AdminHome />} />
+        {/* Owner-authenticated project detail (uses session cookie). */}
+        <Route path="/admin/projects/:id" element={<ManageView />} />
+        {/* Token-shared project view (manage token comes from the URL hash). */}
+        <Route path="/admin/p/:id" element={<ManageView fromHash />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
   )
 }
 

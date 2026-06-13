@@ -4,7 +4,7 @@ import { api, ApiError, type UpdateCheckResult, type UpdateStatus, type VersionI
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { refreshIfClientCacheChanged } from '@/lib/client-cache'
+import { noteClientCacheKey } from '@/lib/client-cache'
 
 const ACTIVE_STATES = new Set(['checking', 'downloading', 'applying'])
 
@@ -64,15 +64,9 @@ export function UpdatePanel() {
       api.updateStatus(),
       api.clientVersion(true),
     ])
-    if (
-      await refreshIfClientCacheChanged(clientVersion.cache_key, () => {
-        setVersion(versionData.version)
-        setStatus(statusData.status)
-        setMessage('新版本已安装，正在强制刷新缓存')
-      })
-    ) {
-      return
-    }
+    // Feed the cache key to the global coordinator; it surfaces an update via
+    // the global UpdateBanner rather than force-reloading here.
+    noteClientCacheKey(clientVersion.cache_key)
     setVersion(versionData.version)
     setStatus(statusData.status)
   }, [])
