@@ -118,9 +118,6 @@ func (c *Config) applyDefaults() {
 	if c.Update.CheckInterval <= 0 {
 		c.Update.CheckInterval = 3600
 	}
-	if c.Update.ProxyBaseURL == "" {
-		c.Update.ProxyBaseURL = "https://dl.repo.chycloud.top"
-	}
 	if c.Update.Repo == "" {
 		c.Update.Repo = "lieyanc/FireVoiceBox"
 	}

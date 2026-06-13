@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ type Config struct {
 	Enabled       bool   `json:"enabled"`
 	Channel       string `json:"channel"`
 	CheckInterval int    `json:"check_interval"`
-	ProxyBaseURL  string `json:"proxy_base_url"`
+	Tag           string `json:"tag"`
 	Repo          string `json:"repo"`
 }
 
@@ -79,6 +80,8 @@ const (
 	progressApplying      = 98
 	progressComplete      = 100
 )
+
+var githubReleaseBaseURL = "https://github.com"
 
 func New(cfg func() Config, dataDir func() string, logger *log.Logger, hooks RestartHooks) *Updater {
 	if logger == nil {
@@ -340,20 +343,12 @@ func (u *Updater) notifyExecFailure(err error) {
 }
 
 type releaseInfo struct {
-	TagName         string      `json:"tag_name"`
-	TargetCommitish string      `json:"target_commitish"`
-	Prerelease      bool        `json:"prerelease"`
-	Body            string      `json:"body"`
-	Assets          []assetInfo `json:"assets"`
-	Version         string
-	Commit          string
-	BuildTime       string
-}
-
-type assetInfo struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-	Size               int64  `json:"size"`
+	TagName    string
+	Prerelease bool
+	Body       string
+	Version    string
+	Commit     string
+	BuildTime  string
 }
 
 type releaseVersionInfo struct {
@@ -375,64 +370,46 @@ func (u *Updater) checkForUpdate(ctx context.Context, cfg Config) (*releaseInfo,
 		return nil, false, fmt.Errorf("update repo is not configured")
 	}
 
-	tag := "latest"
-	if cfg.Channel != "stable" {
-		tag = "dev"
-	}
-
-	url := fmt.Sprintf("%s/api/releases/%s/%s", strings.TrimRight(cfg.ProxyBaseURL, "/"), cfg.Repo, tag)
-	u.logger.Printf("update: checking %s", url)
-
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, url, nil)
+	targetName, err := u.targetName()
 	if err != nil {
 		return nil, false, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+
+	tag, err := u.resolveReleaseTag(checkCtx, cfg, targetName)
 	if err != nil {
 		return nil, false, err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		u.logger.Printf("update: no release found for channel %s", cfg.Channel)
-		return nil, false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	release := releaseInfo{
+		TagName:    tag,
+		Prerelease: cfg.Channel != "stable",
 	}
 
-	var release releaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, false, fmt.Errorf("decode release: %w", err)
+	binaryURL := releaseDownloadURL(cfg.Repo, tag, targetName)
+	u.logger.Printf("update: checking %s", binaryURL)
+
+	if err := u.ensureAssetAvailable(checkCtx, binaryURL); err != nil {
+		return nil, false, err
 	}
+
 	if cfg.Channel != "stable" {
 		if err := u.loadReleaseVersion(checkCtx, cfg, &release); err != nil {
-			u.logger.Printf("update: version metadata unavailable for %s: %v", release.TagName, err)
+			u.logger.Printf("update: version metadata unavailable for %s: %v", tag, err)
 		}
 	}
+
 	if !u.isNewer(release, cfg.Channel) {
 		u.logger.Printf("update: already up to date (%s)", release.displayVersion())
 		return &release, false, nil
 	}
+
 	return &release, true, nil
 }
 
 func (u *Updater) loadReleaseVersion(ctx context.Context, cfg Config, release *releaseInfo) error {
-	var versionAsset *assetInfo
-	for i := range release.Assets {
-		if release.Assets[i].Name == "version.json" {
-			versionAsset = &release.Assets[i]
-			break
-		}
-	}
-	if versionAsset == nil {
-		return fmt.Errorf("version.json asset not found")
-	}
-
-	versionURL := u.proxyDownloadURL(cfg, versionAsset.BrowserDownloadURL)
+	versionURL := releaseDownloadURL(cfg.Repo, release.TagName, "version.json")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
 	if err != nil {
 		return err
@@ -456,6 +433,75 @@ func (u *Updater) loadReleaseVersion(ctx context.Context, cfg Config, release *r
 	return nil
 }
 
+func (u *Updater) resolveReleaseTag(ctx context.Context, cfg Config, targetName string) (string, error) {
+	if cfg.Tag != "" {
+		return cfg.Tag, nil
+	}
+	if cfg.Channel != "stable" {
+		return "dev", nil
+	}
+	return u.resolveLatestStableTag(ctx, cfg.Repo, targetName)
+}
+
+func (u *Updater) resolveLatestStableTag(ctx context.Context, repo, targetName string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, latestReleaseDownloadURL(repo, targetName), nil)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+		return "", fmt.Errorf("latest release redirect returned status %d", resp.StatusCode)
+	}
+
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", fmt.Errorf("latest release redirect missing location")
+	}
+	locationURL, err := req.URL.Parse(location)
+	if err != nil {
+		return "", fmt.Errorf("parse latest release redirect: %w", err)
+	}
+	tag, ok := releaseTagFromDownloadPath(locationURL.EscapedPath())
+	if !ok {
+		tag, ok = releaseTagFromDownloadPath(locationURL.Path)
+	}
+	if !ok || tag == "" {
+		return "", fmt.Errorf("latest release redirect did not include a tag")
+	}
+	u.logger.Printf("update: resolved latest release tag %s", tag)
+	return tag, nil
+}
+
+func (u *Updater) ensureAssetAvailable(ctx context.Context, assetURL string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, assetURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("release asset not found: %s", assetURL)
+	}
+	return fmt.Errorf("release asset check returned status %d", resp.StatusCode)
+}
+
 func (u *Updater) isNewer(release releaseInfo, channel string) bool {
 	current := version.Version
 	if current == "dev" {
@@ -463,13 +509,14 @@ func (u *Updater) isNewer(release releaseInfo, channel string) bool {
 	}
 	remoteTag := release.TagName
 	if channel == "stable" {
+		remoteVersion := release.displayVersion()
+		if remoteVersion != "" {
+			return semverGreater(remoteVersion, current)
+		}
 		return semverGreater(remoteTag, current)
 	}
 
 	remoteCommit := normalizeCommit(release.Commit)
-	if remoteCommit == "" {
-		remoteCommit = normalizeCommit(release.TargetCommitish)
-	}
 	currentCommit := normalizeCommit(version.Commit)
 	if remoteCommit != "" && currentCommit != "" {
 		return remoteCommit != currentCommit
@@ -543,6 +590,34 @@ func parseDevTag(tag string) (runNumber int, sha string) {
 	return 0, ""
 }
 
+func releaseDownloadURL(repo, tag, asset string) string {
+	return strings.TrimRight(githubReleaseBaseURL, "/") + "/" + strings.Trim(repo, "/") +
+		"/releases/download/" + url.PathEscape(tag) + "/" + url.PathEscape(asset)
+}
+
+func latestReleaseDownloadURL(repo, asset string) string {
+	return strings.TrimRight(githubReleaseBaseURL, "/") + "/" + strings.Trim(repo, "/") +
+		"/releases/latest/download/" + url.PathEscape(asset)
+}
+
+func releaseTagFromDownloadPath(path string) (string, bool) {
+	const relSegment = "/releases/download/"
+	idx := strings.Index(path, relSegment)
+	if idx < 0 {
+		return "", false
+	}
+	rest := path[idx+len(relSegment):]
+	end := strings.IndexByte(rest, '/')
+	if end < 0 {
+		return "", false
+	}
+	tag, err := url.PathUnescape(rest[:end])
+	if err != nil {
+		return "", false
+	}
+	return tag, true
+}
+
 func (u *Updater) targetName() (string, error) {
 	return releaseTargetName(runtime.GOOS, runtime.GOARCH)
 }
@@ -573,19 +648,6 @@ func (u *Updater) download(ctx context.Context, cfg Config, release *releaseInfo
 	if err != nil {
 		return "", err
 	}
-	var binaryAsset, sha256Asset *assetInfo
-	for i := range release.Assets {
-		a := &release.Assets[i]
-		if a.Name == targetName {
-			binaryAsset = a
-		}
-		if a.Name == targetName+".sha256" {
-			sha256Asset = a
-		}
-	}
-	if binaryAsset == nil {
-		return "", fmt.Errorf("no asset found for %s in release %s", targetName, release.TagName)
-	}
 
 	updateDir := filepath.Join(u.dataDir(), "updates")
 	if err := os.MkdirAll(updateDir, 0o755); err != nil {
@@ -599,23 +661,23 @@ func (u *Updater) download(ctx context.Context, cfg Config, release *releaseInfo
 	tmpPath := filepath.Join(updateDir, finalName+".tmp")
 	finalPath := filepath.Join(updateDir, finalName)
 
-	downloadURL := u.proxyDownloadURL(cfg, binaryAsset.BrowserDownloadURL)
-	if err := u.downloadFile(ctx, downloadURL, tmpPath, binaryAsset.Size); err != nil {
+	downloadURL := releaseDownloadURL(cfg.Repo, release.TagName, targetName)
+	if err := u.downloadFile(ctx, downloadURL, tmpPath, 0); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("download binary: %w", err)
 	}
 
-	if sha256Asset != nil {
+	sha256URL := releaseDownloadURL(cfg.Repo, release.TagName, targetName+".sha256")
+	expectedHash, hasHash, err := u.fetchSHA256(ctx, sha256URL)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("fetch sha256: %w", err)
+	}
+	if hasHash {
 		u.mu.Lock()
 		u.status.Progress = progressVerifyStart
 		u.mu.Unlock()
 
-		sha256URL := u.proxyDownloadURL(cfg, sha256Asset.BrowserDownloadURL)
-		expectedHash, err := u.fetchSHA256(ctx, sha256URL)
-		if err != nil {
-			_ = os.Remove(tmpPath)
-			return "", fmt.Errorf("fetch sha256: %w", err)
-		}
 		actualHash, err := fileSHA256(tmpPath)
 		if err != nil {
 			_ = os.Remove(tmpPath)
@@ -639,23 +701,6 @@ func (u *Updater) download(ctx context.Context, cfg Config, release *releaseInfo
 
 	u.logger.Printf("update: downloaded %s to %s", release.TagName, finalPath)
 	return finalPath, nil
-}
-
-func (u *Updater) proxyDownloadURL(cfg Config, browserURL string) string {
-	base := strings.TrimRight(cfg.ProxyBaseURL, "/")
-	const ghPrefix = "https://github.com/"
-	if !strings.HasPrefix(browserURL, ghPrefix) {
-		return browserURL
-	}
-	path := strings.TrimPrefix(browserURL, ghPrefix)
-	const relSegment = "/releases/download/"
-	idx := strings.Index(path, relSegment)
-	if idx < 0 {
-		return browserURL
-	}
-	ownerRepo := path[:idx]
-	tagAndAsset := path[idx+len(relSegment):]
-	return base + "/download/" + ownerRepo + "/" + tagAndAsset
 }
 
 func (u *Updater) downloadFile(ctx context.Context, url, destPath string, expectedSize int64) error {
@@ -719,29 +764,33 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string, expect
 	return nil
 }
 
-func (u *Updater) fetchSHA256(ctx context.Context, url string) (string, error) {
+func (u *Updater) fetchSHA256(ctx context.Context, url string) (string, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		u.logger.Printf("update: checksum asset not found, skipping SHA256 verification")
+		return "", false, nil
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("sha256 download returned status %d", resp.StatusCode)
+		return "", false, fmt.Errorf("sha256 download returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	parts := strings.Fields(strings.TrimSpace(string(body)))
 	if len(parts) == 0 {
-		return "", fmt.Errorf("empty sha256 file")
+		return "", false, fmt.Errorf("empty sha256 file")
 	}
-	return parts[0], nil
+	return parts[0], true, nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -904,10 +953,7 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.CheckInterval <= 0 {
 		cfg.CheckInterval = 3600
 	}
-	if strings.TrimSpace(cfg.ProxyBaseURL) == "" {
-		cfg.ProxyBaseURL = "https://dl.repo.chycloud.top"
-	}
-	cfg.ProxyBaseURL = strings.TrimRight(strings.TrimSpace(cfg.ProxyBaseURL), "/")
+	cfg.Tag = strings.TrimSpace(cfg.Tag)
 	cfg.Repo = strings.TrimSpace(cfg.Repo)
 	if cfg.Repo == "" {
 		cfg.Repo = "lieyanc/FireVoiceBox"

@@ -10,31 +10,77 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/lieyan666/firevoicebox/internal/version"
 )
 
-func TestCheckOnlySelectsNewestStableRelease(t *testing.T) {
+func TestCheckOnlyResolvesLatestStableReleaseWithoutAPI(t *testing.T) {
 	originalVersion := version.Version
 	defer func() { version.Version = originalVersion }()
 	version.Version = "v1.0.0"
 
+	targetName := testTargetName(t)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/releases/owner/repo/latest" {
+		switch r.URL.Path {
+		case "/owner/repo/releases/latest/download/" + targetName:
+			if r.Method != http.MethodHead {
+				t.Fatalf("expected HEAD, got %s", r.Method)
+			}
+			http.Redirect(w, r, "/owner/repo/releases/download/v1.4.0/"+targetName, http.StatusFound)
+		case "/owner/repo/releases/download/v1.4.0/" + targetName:
+			if r.Method != http.MethodHead {
+				t.Fatalf("expected HEAD, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(releaseInfo{
-			TagName: "v1.4.0",
-			Assets:  []assetInfo{},
-		})
 	}))
 	defer server.Close()
+	setGitHubReleaseBaseURL(t, server.URL)
 
 	u := testUpdater(Config{
-		Channel:      "stable",
-		ProxyBaseURL: server.URL,
-		Repo:         "owner/repo",
+		Channel: "stable",
+		Repo:    "owner/repo",
+	})
+
+	result, err := u.CheckOnly(context.Background())
+	if err != nil {
+		t.Fatalf("CheckOnly returned error: %v", err)
+	}
+	if !result.HasUpdate {
+		t.Fatalf("expected update to be available")
+	}
+	if result.LatestVersion != "v1.4.0" {
+		t.Fatalf("expected latest version v1.4.0, got %q", result.LatestVersion)
+	}
+}
+
+func TestCheckOnlyUsesConfiguredReleaseTag(t *testing.T) {
+	originalVersion := version.Version
+	defer func() { version.Version = originalVersion }()
+	version.Version = "v1.0.0"
+	targetName := testTargetName(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/owner/repo/releases/download/v1.4.0/"+targetName {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodHead {
+			t.Fatalf("expected HEAD, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	setGitHubReleaseBaseURL(t, server.URL)
+
+	u := testUpdater(Config{
+		Channel: "stable",
+		Tag:     "v1.4.0",
+		Repo:    "owner/repo",
 	})
 
 	result, err := u.CheckOnly(context.Background())
@@ -57,22 +103,16 @@ func TestCheckOnlySelectsNewestPrerelease(t *testing.T) {
 	version.Version = "dev-0007-20260401-aaaaaaa"
 	version.Commit = "aaaaaaa"
 	remoteVersion := "dev-0042-20260425-bbbbbbb"
+	targetName := testTargetName(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/releases/owner/repo/dev":
-			_ = json.NewEncoder(w).Encode(releaseInfo{
-				TagName:         "dev",
-				TargetCommitish: "bbbbbbb",
-				Prerelease:      true,
-				Assets: []assetInfo{
-					{
-						Name:               "version.json",
-						BrowserDownloadURL: "https://github.com/owner/repo/releases/download/dev/version.json",
-					},
-				},
-			})
-		case "/download/owner/repo/dev/version.json":
+		case "/owner/repo/releases/download/dev/" + targetName:
+			if r.Method != http.MethodHead {
+				t.Fatalf("expected HEAD, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/owner/repo/releases/download/dev/version.json":
 			_ = json.NewEncoder(w).Encode(releaseVersionInfo{
 				Version:   remoteVersion,
 				Commit:    "bbbbbbb",
@@ -84,11 +124,11 @@ func TestCheckOnlySelectsNewestPrerelease(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	setGitHubReleaseBaseURL(t, server.URL)
 
 	u := testUpdater(Config{
-		Channel:      "dev",
-		ProxyBaseURL: server.URL,
-		Repo:         "owner/repo",
+		Channel: "dev",
+		Repo:    "owner/repo",
 	})
 
 	result, err := u.CheckOnly(context.Background())
@@ -110,22 +150,16 @@ func TestCheckOnlySkipsDevReleaseForSameCommit(t *testing.T) {
 	defer func() { version.Commit = originalCommit }()
 	version.Version = "dev-0042-20260425-bbbbbbb"
 	version.Commit = "bbbbbbb"
+	targetName := testTargetName(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/releases/owner/repo/dev":
-			_ = json.NewEncoder(w).Encode(releaseInfo{
-				TagName:         "dev",
-				TargetCommitish: "bbbbbbb",
-				Prerelease:      true,
-				Assets: []assetInfo{
-					{
-						Name:               "version.json",
-						BrowserDownloadURL: "https://github.com/owner/repo/releases/download/dev/version.json",
-					},
-				},
-			})
-		case "/download/owner/repo/dev/version.json":
+		case "/owner/repo/releases/download/dev/" + targetName:
+			if r.Method != http.MethodHead {
+				t.Fatalf("expected HEAD, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/owner/repo/releases/download/dev/version.json":
 			_ = json.NewEncoder(w).Encode(releaseVersionInfo{
 				Version:   "dev-0042-20260425-bbbbbbb",
 				Commit:    "bbbbbbb",
@@ -137,11 +171,11 @@ func TestCheckOnlySkipsDevReleaseForSameCommit(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	setGitHubReleaseBaseURL(t, server.URL)
 
 	u := testUpdater(Config{
-		Channel:      "dev",
-		ProxyBaseURL: server.URL,
-		Repo:         "owner/repo",
+		Channel: "dev",
+		Repo:    "owner/repo",
 	})
 
 	result, err := u.CheckOnly(context.Background())
@@ -187,32 +221,15 @@ func TestPerformUpdateDownloadsAndVerifiesPrerelease(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/releases/owner/repo/dev":
-			_ = json.NewEncoder(w).Encode(releaseInfo{
-				TagName:         tag,
-				TargetCommitish: "bbbbbbb",
-				Prerelease:      true,
-				Assets: []assetInfo{
-					{
-						Name:               targetName,
-						BrowserDownloadURL: "https://github.com/owner/repo/releases/download/" + tag + "/" + targetName,
-						Size:               int64(len(binary)),
-					},
-					{
-						Name:               targetName + ".sha256",
-						BrowserDownloadURL: "https://github.com/owner/repo/releases/download/" + tag + "/" + targetName + ".sha256",
-					},
-					{
-						Name:               "version.json",
-						BrowserDownloadURL: "https://github.com/owner/repo/releases/download/" + tag + "/version.json",
-					},
-				},
-			})
-		case "/download/owner/repo/" + tag + "/" + targetName:
+		case "/owner/repo/releases/download/" + tag + "/" + targetName:
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 			_, _ = w.Write(binary)
-		case "/download/owner/repo/" + tag + "/" + targetName + ".sha256":
+		case "/owner/repo/releases/download/" + tag + "/" + targetName + ".sha256":
 			_, _ = w.Write([]byte(sum + "  " + targetName + "\n"))
-		case "/download/owner/repo/" + tag + "/version.json":
+		case "/owner/repo/releases/download/" + tag + "/version.json":
 			_ = json.NewEncoder(w).Encode(releaseVersionInfo{
 				Version:   remoteVersion,
 				Commit:    "bbbbbbb",
@@ -224,7 +241,7 @@ func TestPerformUpdateDownloadsAndVerifiesPrerelease(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cfg.ProxyBaseURL = server.URL
+	setGitHubReleaseBaseURL(t, server.URL)
 
 	u.performUpdate(context.Background())
 
@@ -277,6 +294,24 @@ func TestReleaseTargetNameIncludesOnlyPublishedTargets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testTargetName(t *testing.T) string {
+	t.Helper()
+	targetName, err := releaseTargetName(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatalf("releaseTargetName returned error: %v", err)
+	}
+	return targetName
+}
+
+func setGitHubReleaseBaseURL(t *testing.T, baseURL string) {
+	t.Helper()
+	original := githubReleaseBaseURL
+	githubReleaseBaseURL = baseURL
+	t.Cleanup(func() {
+		githubReleaseBaseURL = original
+	})
 }
 
 func testUpdater(cfg Config) *Updater {

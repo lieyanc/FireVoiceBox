@@ -81,7 +81,7 @@ The config file is JSON. It is created automatically on first run; you can also 
     "enabled": false,         // enable background OTA checks
     "channel": "stable",      // "stable" = latest v* release; "dev" = dev prerelease
     "check_interval": 3600,   // seconds between background checks
-    "proxy_base_url": "https://dl.repo.chycloud.top",
+    "tag": "",                // optional exact GitHub release tag; empty uses latest/dev
     "repo": "lieyanc/FireVoiceBox"
   }
 }
@@ -161,10 +161,12 @@ Linux (`amd64`, `arm64`) and macOS (`amd64`, `arm64`) binaries, uploads
 `version.json`. Tags matching `v*` publish stable releases and mark them as
 latest.
 
-The admin backend exposes a **系统更新** panel. It checks the configured repo
-through `update.proxy_base_url`, downloads the matching `firevoicebox-<target>`
-asset, verifies the checksum, and restarts into the new binary. Stable updates
-apply immediately after download; dev updates wait for admin confirmation.
+The admin backend exposes a **系统更新** panel. It downloads directly from
+GitHub Releases by tag, using the matching `firevoicebox-<target>` asset and
+its `.sha256` checksum. Set `update.tag` to an exact release tag, or leave it
+empty so stable follows GitHub's latest-release redirect and dev uses the fixed
+`dev` tag. Stable updates apply immediately after download; dev updates wait
+for admin confirmation.
 
 For local smoke tests of published assets:
 
