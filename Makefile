@@ -15,7 +15,7 @@ LD_VERSION_FLAGS := -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commi
 all: build
 
 ## build: build the frontend then the single Go binary (UI embedded)
-build: web backend
+build: backend
 
 ## web: install deps (if needed) and build the React app into internal/web/dist
 web:
@@ -29,8 +29,8 @@ ensure-dist:
 	@mkdir -p internal/web/dist
 	@test -f internal/web/dist/index.html || cp internal/web/placeholder.html internal/web/dist/index.html
 
-## backend: compile the Go binary (assumes internal/web/dist is present)
-backend: ensure-dist
+## backend: rebuild the frontend, then compile the Go binary with that UI embedded
+backend: web
 	go build -ldflags="$(LD_VERSION_FLAGS)" -o $(BINARY) $(PKG)
 
 ## run: build everything and run it
@@ -40,7 +40,7 @@ run: build
 ## dev: run backend (:8080) and Vite dev server (:5173 with /api proxy) together.
 ## Run `make backend && ./bin/firevoicebox` in one shell and `make web-dev` in another,
 ## or use this target which backgrounds the API.
-dev:
+dev: ensure-dist
 	go run $(PKG) & \
 	cd $(WEB) && pnpm dev
 

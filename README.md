@@ -44,13 +44,13 @@ Prerequisites: **Go 1.24+**, **Node 18+**, **pnpm**.
 | Command | What it does |
 | --- | --- |
 | `make build` | Build the React app into `internal/web/dist`, then compile `bin/firevoicebox` with the UI embedded. |
-| `make backend` | Compile the Go binary only (UI must already be built). |
+| `make backend` | Rebuild the frontend, then compile the Go binary with that UI embedded. |
 | `make web` | Build the frontend only. |
 | `make test` | Run all Go tests. |
 | `make release` | Cross-compile a static `linux/amd64` binary (`bin/firevoicebox-linux-amd64`). |
 | `make web-dev` | Start the Vite dev server on `:5173`, proxying `/api` → `:8080`. |
 
-**Local development:** run the API with `go run ./cmd/firevoicebox` (serves `:8080`), and in another terminal `make web-dev` for hot-reloading UI on `:5173`.
+**Local development:** run `make dev` to start the API on `:8080` and the Vite dev server on `:5173`, or run `make backend && ./bin/firevoicebox` in one terminal and `make web-dev` in another.
 
 ---
 
